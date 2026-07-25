@@ -159,13 +159,16 @@ Build the full ingestion skeleton against the simplest input first.
 
 ## Phase 3 — Core RAG Loop, End-to-End
 
-- [ ] Embed the query, vector-search scoped to the current notebook
-- [ ] Retrieved chunks → prompt template → LLM call
-- [ ] Return the answer plus which chunk IDs it used
-- [ ] Inline citation markers in the answer (`[1]`, `[2]`, …)
-- [ ] Explicit "not found in your sources" fallback when retrieval is empty or weak
+- [x] Embed the query, vector-search scoped to the current notebook (top-5 by cosine similarity)
+- [x] Retrieved chunks → system prompt with numbered sources → LLM call (OpenRouter / gpt-4o-mini)
+- [x] Streaming response — tokens arrive incrementally via `ReadableStream`
+- [x] Inline citation markers in the answer (`[1]`, `[2]`, …) matching the retrieved chunks
+- [x] Citations panel below the latest answer — shows source name and chunk index for each retrieved chunk
+- [x] Multi-turn conversation thread — full history visible, follow-up questions work
+- [x] Non-streaming fallback when retrieval returns 0 results — `application/json` response with "not found in your sources" message
+- [x] Input disabled while a request is in flight
 
-**Checkpoint:** Ask a question about your one text source, get a grounded, cited answer.
+**Checkpoint:** Ask a question about your text source, get a grounded streamed answer with inline citations. ✓
 
 ---
 

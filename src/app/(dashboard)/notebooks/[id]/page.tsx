@@ -277,15 +277,8 @@ export default function NotebookDetailPage() {
         )}
       </section>
 
-      {/* Chat placeholder */}
-      <section>
-        <h2 className="text-xl font-semibold mb-4">Chat</h2>
-        <div className="border border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg p-8 text-center">
-          <p className="text-zinc-500">
-            Add sources to start asking questions about your documents.
-          </p>
-        </div>
-      </section>
+      {/* Chat section */}
+      <ChatSection notebookId={params.id} sources={sources} />
     </div>
   );
 }
@@ -315,4 +308,216 @@ function StatusBadge({ status }: { status: Source["status"] }) {
     default:
       return null;
   }
+}
+
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface Citation {
+  id: string;
+  sourceId: string;
+  chunkIndex: number;
+  metadata: Record<string, unknown>;
+}
+
+function ChatSection({
+  notebookId,
+  sources,
+}: {
+  notebookId: string;
+  sources: Source[];
+}) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [citations, setCitations] = useState<Citation[]>([]);
+  const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const hasReadySources = sources.some((s) => s.status === "ready");
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = question.trim();
+    if (!trimmed || asking) return;
+
+    // 1. Append user message
+    const userMessage: Message = { role: "user", content: trimmed };
+    setMessages((prev) => [...prev, userMessage]);
+    setQuestion("");
+    setAsking(true);
+    setCitations([]);
+
+    // 2. Append empty assistant placeholder
+    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
+    try {
+      const res = await fetch("/api/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notebookId, question: trimmed }),
+      });
+
+      const contentType = res.headers.get("Content-Type") || "";
+
+      // Non-streaming JSON fallback (no results found)
+      if (contentType.includes("application/json")) {
+        const data = await res.json();
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: data.answer,
+          };
+          return updated;
+        });
+        setCitations(data.citations || []);
+        setAsking(false);
+        return;
+      }
+
+      // Read X-Citations header before consuming the stream
+      const citationsHeader = res.headers.get("X-Citations");
+      const parsedCitations: Citation[] = citationsHeader
+        ? JSON.parse(citationsHeader)
+        : [];
+
+      // Stream the response body
+      const reader = res.body?.getReader();
+      if (!reader) {
+        setAsking(false);
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        accumulated += decoder.decode(value, { stream: true });
+        const current = accumulated;
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: current,
+          };
+          return updated;
+        });
+      }
+
+      setCitations(parsedCitations);
+    } catch (err) {
+      console.error("Query failed:", err);
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: "Something went wrong. Please try again.",
+        };
+        return updated;
+      });
+    } finally {
+      setAsking(false);
+    }
+  }
+
+  // Look up source name by ID
+  function getSourceName(sourceId: string): string {
+    const source = sources.find((s) => s.id === sourceId);
+    return source?.name || "Unknown source";
+  }
+
+  return (
+    <section>
+      <h2 className="text-xl font-semibold mb-4">Chat</h2>
+
+      <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg flex flex-col h-[500px]">
+        {/* Message history */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.length === 0 && (
+            <p className="text-zinc-400 text-center mt-8">
+              Ask a question about your sources.
+            </p>
+          )}
+
+          {messages.map((msg, idx) => (
+            <div
+              key={idx}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                  msg.role === "user"
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
+                }`}
+              >
+                {msg.content || (
+                  <span className="inline-flex items-center gap-1 text-zinc-400">
+                    <span className="inline-block w-2 h-2 rounded-full bg-zinc-400 animate-pulse" />
+                    Thinking…
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* Citations panel — shown after the latest assistant message */}
+          {citations.length > 0 && !asking && (
+            <div className="ml-0 mt-2 p-3 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg">
+              <p className="text-xs font-semibold text-zinc-500 uppercase mb-2">
+                Citations
+              </p>
+              <ol className="list-decimal list-inside space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+                {citations.map((citation, idx) => (
+                  <li key={citation.id}>
+                    <span className="font-medium">[{idx + 1}]</span>{" "}
+                    {getSourceName(citation.sourceId)} — chunk{" "}
+                    {citation.chunkIndex}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input row */}
+        <form
+          onSubmit={handleSubmit}
+          className="border-t border-zinc-200 dark:border-zinc-700 p-3 flex gap-2"
+        >
+          <input
+            type="text"
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder={
+              hasReadySources
+                ? "Ask a question about your sources…"
+                : "Add a source and wait for it to finish indexing…"
+            }
+            disabled={!hasReadySources || asking}
+            className="flex-1 px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md bg-transparent focus:outline-none focus:ring-2 focus:ring-zinc-400 disabled:opacity-50 disabled:cursor-not-allowed"
+          />
+          <button
+            type="submit"
+            disabled={!hasReadySources || asking || !question.trim()}
+            className="px-4 py-2 bg-zinc-900 text-white rounded-md hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          >
+            {asking ? "…" : "Send"}
+          </button>
+        </form>
+      </div>
+    </section>
+  );
 }
