@@ -17,7 +17,18 @@ import { db } from "@/lib/db";
 import { sources } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { extractText } from "@/lib/ingestion/extractors/text";
-import { chunkText } from "@/lib/ingestion/chunking/chunkText";
+import { extractWebsite } from "@/lib/ingestion/extractors/website";
+import { extractPdfPages } from "@/lib/ingestion/extractors/pdf";
+import {
+  extractVtt,
+  groupCuesIntoWindows,
+} from "@/lib/ingestion/extractors/vtt";
+import {
+  extractYouTube,
+  groupSegmentsIntoWindows,
+} from "@/lib/ingestion/extractors/youtube";
+import { chunkText, chunkSections } from "@/lib/ingestion/chunking/chunkText";
+import type { ChunkResult } from "@/lib/ingestion/chunking/chunkText";
 import { embedTexts } from "@/lib/retrieval/embed";
 import postgres from "postgres";
 
@@ -47,31 +58,118 @@ async function processIndexingJob(job: Job<IndexingJobData>) {
     }
     await job.updateProgress(30);
 
-    // Step 3: Extract content based on source type
-    if (sourceType !== "text") {
-      throw new Error(
-        `Unsupported source type: ${sourceType}. Only "text" is supported in Phase 2.`,
-      );
+    // Step 3: Extract content and chunk based on source type
+    let chunks: ChunkResult[];
+
+    switch (sourceType) {
+      case "text": {
+        const extractedContent = await extractText(source.rawContent || "");
+        if (!extractedContent) {
+          throw new Error(`Source ${sourceId} has no content to process`);
+        }
+        chunks = await chunkText(extractedContent);
+        break;
+      }
+
+      case "website": {
+        const url = (source.metadata as Record<string, unknown>)?.url as string;
+        if (!url) {
+          throw new Error(`Source ${sourceId} is missing metadata.url`);
+        }
+        const websiteContent = await extractWebsite(url);
+
+        // Store the extracted text as rawContent for future reference
+        await db
+          .update(sources)
+          .set({ rawContent: websiteContent, updatedAt: new Date() })
+          .where(eq(sources.id, sourceId));
+
+        chunks = await chunkText(websiteContent);
+        break;
+      }
+
+      case "pdf": {
+        const rawContent = source.rawContent;
+        if (!rawContent) {
+          throw new Error(`Source ${sourceId} has no PDF content (base64)`);
+        }
+        const pdfBuffer = Buffer.from(rawContent, "base64");
+        const pages = await extractPdfPages(pdfBuffer);
+
+        // Store full text as rawContent (overwrite base64 with extracted text)
+        const fullText = pages.map((p) => p.text).join("\n\n");
+        await db
+          .update(sources)
+          .set({ rawContent: fullText, updatedAt: new Date() })
+          .where(eq(sources.id, sourceId));
+
+        // Use chunkSections with page metadata
+        const sections = pages.map((page) => ({
+          text: page.text,
+          metadata: { pageNumber: page.pageNumber },
+        }));
+        chunks = await chunkSections(sections);
+        break;
+      }
+
+      case "vtt": {
+        const vttContent = source.rawContent;
+        if (!vttContent) {
+          throw new Error(`Source ${sourceId} has no VTT/SRT content`);
+        }
+
+        // Determine format from metadata
+        const metadata = source.metadata as Record<string, unknown> | null;
+        const filename = (metadata?.filename as string) || "";
+        const format: "vtt" | "srt" = filename.endsWith(".srt") ? "srt" : "vtt";
+
+        const cues = await extractVtt(vttContent, format);
+        if (cues.length === 0) {
+          throw new Error(`Source ${sourceId} produced no subtitle cues`);
+        }
+
+        // Group cues into time windows and chunk
+        const windows = groupCuesIntoWindows(cues);
+        chunks = await chunkSections(windows);
+        break;
+      }
+
+      case "youtube": {
+        const metadata = source.metadata as Record<string, unknown> | null;
+        const videoUrl = metadata?.videoUrl as string;
+        if (!videoUrl) {
+          throw new Error(`Source ${sourceId} is missing metadata.videoUrl`);
+        }
+
+        const segments = await extractYouTube(videoUrl);
+
+        // Store reconstructed transcript as rawContent
+        const transcriptText = segments.map((s) => s.text).join(" ");
+        await db
+          .update(sources)
+          .set({ rawContent: transcriptText, updatedAt: new Date() })
+          .where(eq(sources.id, sourceId));
+
+        // Group segments into time windows and chunk
+        const windows = groupSegmentsIntoWindows(segments);
+        chunks = await chunkSections(windows);
+        break;
+      }
+
+      default:
+        throw new Error(
+          `Unsupported source type: ${sourceType}. Supported types: text, website, pdf, vtt, youtube.`,
+        );
     }
-
-    const extractedContent = await extractText(source.rawContent || "");
-
-    if (!extractedContent) {
-      throw new Error(`Source ${sourceId} has no content to process`);
-    }
-    await job.updateProgress(50);
-
-    // Step 4: Chunk the content
-    const chunks = await chunkText(extractedContent);
 
     if (chunks.length === 0) {
       throw new Error(`Source ${sourceId} produced no chunks after splitting`);
     }
 
     console.log(`[Worker] Source ${sourceId}: ${chunks.length} chunks created`);
-    await job.updateProgress(70);
+    await job.updateProgress(50);
 
-    // Step 5: Generate embeddings (batched)
+    // Step 4: Generate embeddings (batched)
     const embeddings = await embedTexts(chunks.map((c) => c.content));
 
     console.log(
@@ -79,10 +177,7 @@ async function processIndexingJob(job: Job<IndexingJobData>) {
     );
     await job.updateProgress(90);
 
-    // Step 6: Store chunks + embeddings in the vector DB
-    // Use raw postgres client — the embedding column is vector(1536) added via raw SQL
-    // in migrate.ts, so Drizzle doesn't know about it. Insert each row individually
-    // rather than via jsonb_to_recordset, which can't reliably cast jsonb arrays to ::vector.
+    // Step 5: Store chunks + embeddings in the vector DB
     const sql = postgres(process.env.DATABASE_URL!);
 
     try {
@@ -107,7 +202,7 @@ async function processIndexingJob(job: Job<IndexingJobData>) {
       await sql.end();
     }
 
-    // Step 7: Update status to "ready"
+    // Step 6: Update status to "ready"
     await db
       .update(sources)
       .set({ status: "ready", updatedAt: new Date() })

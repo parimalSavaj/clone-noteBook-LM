@@ -33,7 +33,13 @@ export default function NotebookDetailPage() {
   const [showUploadForm, setShowUploadForm] = useState(false);
   const [uploadName, setUploadName] = useState("");
   const [uploadContent, setUploadContent] = useState("");
+  const [uploadType, setUploadType] = useState<
+    "text" | "website" | "pdf" | "vtt" | "youtube"
+  >("text");
+  const [uploadUrl, setUploadUrl] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [reindexingId, setReindexingId] = useState<string | null>(null);
 
   // Polling ref
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -94,34 +100,93 @@ export default function NotebookDetailPage() {
     };
   }, [sources, fetchSources]);
 
+  function resetUploadForm() {
+    setUploadName("");
+    setUploadContent("");
+    setUploadUrl("");
+    setUploadFile(null);
+    setUploadType("text");
+    setShowUploadForm(false);
+  }
+
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
-    if (!uploadContent.trim()) return;
-
     setUploading(true);
+
     try {
-      const name = uploadName.trim() || `Text source ${sources.length + 1}`;
+      let body: Record<string, unknown> = {
+        notebookId: params.id,
+        type: uploadType,
+      };
+
+      switch (uploadType) {
+        case "text": {
+          if (!uploadContent.trim()) return;
+          body.name = uploadName.trim() || `Text source ${sources.length + 1}`;
+          body.content = uploadContent;
+          break;
+        }
+        case "website": {
+          if (!uploadUrl.trim()) return;
+          body.name = uploadName.trim() || uploadUrl.trim();
+          body.metadata = { url: uploadUrl.trim() };
+          break;
+        }
+        case "pdf": {
+          if (!uploadFile) return;
+          const base64 = await readFileAsBase64(uploadFile);
+          body.name = uploadName.trim() || uploadFile.name;
+          body.content = base64;
+          body.metadata = { filename: uploadFile.name };
+          break;
+        }
+        case "vtt": {
+          if (!uploadFile) return;
+          const text = await readFileAsText(uploadFile);
+          const format = uploadFile.name.endsWith(".srt") ? "srt" : "vtt";
+          body.name = uploadName.trim() || uploadFile.name;
+          body.content = text;
+          body.metadata = { filename: uploadFile.name, format };
+          break;
+        }
+        case "youtube": {
+          if (!uploadUrl.trim()) return;
+          body.name = uploadName.trim() || `YouTube: ${uploadUrl.trim()}`;
+          body.metadata = { videoUrl: uploadUrl.trim() };
+          break;
+        }
+      }
+
       const res = await fetch("/api/sources", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          notebookId: params.id,
-          name,
-          type: "text",
-          content: uploadContent,
-        }),
+        body: JSON.stringify(body),
       });
       if (res.ok) {
         const newSource = await res.json();
         setSources((prev) => [...prev, newSource]);
-        setUploadName("");
-        setUploadContent("");
-        setShowUploadForm(false);
+        resetUploadForm();
       }
     } catch (err) {
       console.error("Failed to upload source:", err);
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleReindex(sourceId: string) {
+    setReindexingId(sourceId);
+    try {
+      const res = await fetch(`/api/sources/${sourceId}/reindex`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        await fetchSources();
+      }
+    } catch (err) {
+      console.error("Failed to reindex source:", err);
+    } finally {
+      setReindexingId(null);
     }
   }
 
@@ -200,6 +265,33 @@ export default function NotebookDetailPage() {
             onSubmit={handleUpload}
             className="mb-4 p-4 border border-zinc-200 dark:border-zinc-700 rounded-lg space-y-3"
           >
+            {/* Type selector */}
+            <div className="flex gap-1 flex-wrap">
+              {(["text", "website", "pdf", "vtt", "youtube"] as const).map(
+                (t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => {
+                      setUploadType(t);
+                      setUploadContent("");
+                      setUploadUrl("");
+                      setUploadFile(null);
+                    }}
+                    className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${
+                      uploadType === t
+                        ? "bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-100"
+                        : "border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-400 hover:border-zinc-500"
+                    }`}
+                  >
+                    {t === "vtt"
+                      ? "VTT/SRT"
+                      : t.charAt(0).toUpperCase() + t.slice(1)}
+                  </button>
+                ),
+              )}
+            </div>
+
             <input
               type="text"
               value={uploadName}
@@ -207,28 +299,75 @@ export default function NotebookDetailPage() {
               placeholder="Source name (optional)"
               className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md bg-transparent focus:outline-none focus:ring-2 focus:ring-zinc-400"
             />
-            <textarea
-              value={uploadContent}
-              onChange={(e) => setUploadContent(e.target.value)}
-              placeholder="Paste your text content here…"
-              rows={6}
-              className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md bg-transparent focus:outline-none focus:ring-2 focus:ring-zinc-400 resize-y"
-            />
+
+            {/* Type-specific input */}
+            {uploadType === "text" && (
+              <textarea
+                value={uploadContent}
+                onChange={(e) => setUploadContent(e.target.value)}
+                placeholder="Paste your text content here…"
+                rows={6}
+                className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md bg-transparent focus:outline-none focus:ring-2 focus:ring-zinc-400 resize-y"
+              />
+            )}
+
+            {uploadType === "website" && (
+              <input
+                type="url"
+                value={uploadUrl}
+                onChange={(e) => setUploadUrl(e.target.value)}
+                placeholder="https://example.com/article"
+                className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md bg-transparent focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              />
+            )}
+
+            {uploadType === "pdf" && (
+              <input
+                type="file"
+                accept=".pdf"
+                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md bg-transparent file:mr-3 file:px-3 file:py-1 file:rounded file:border-0 file:bg-zinc-200 dark:file:bg-zinc-700 file:text-sm file:font-medium"
+              />
+            )}
+
+            {uploadType === "vtt" && (
+              <input
+                type="file"
+                accept=".vtt,.srt"
+                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md bg-transparent file:mr-3 file:px-3 file:py-1 file:rounded file:border-0 file:bg-zinc-200 dark:file:bg-zinc-700 file:text-sm file:font-medium"
+              />
+            )}
+
+            {uploadType === "youtube" && (
+              <input
+                type="url"
+                value={uploadUrl}
+                onChange={(e) => setUploadUrl(e.target.value)}
+                placeholder="https://youtube.com/watch?v=..."
+                className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-600 rounded-md bg-transparent focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              />
+            )}
+
             <div className="flex gap-2">
               <button
                 type="submit"
-                disabled={uploading || !uploadContent.trim()}
+                disabled={
+                  uploading ||
+                  !isUploadReady(
+                    uploadType,
+                    uploadContent,
+                    uploadUrl,
+                    uploadFile,
+                  )
+                }
                 className="px-4 py-2 bg-zinc-900 text-white rounded-md hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
               >
                 {uploading ? "Uploading…" : "Upload"}
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setShowUploadForm(false);
-                  setUploadName("");
-                  setUploadContent("");
-                }}
+                onClick={resetUploadForm}
                 className="px-4 py-2 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
               >
                 Cancel
@@ -262,6 +401,19 @@ export default function NotebookDetailPage() {
                 <div className="flex items-center gap-3">
                   {/* Status badge */}
                   <StatusBadge status={source.status} />
+                  {/* Reindex button */}
+                  <button
+                    onClick={() => handleReindex(source.id)}
+                    disabled={
+                      reindexingId === source.id ||
+                      source.status === "uploading" ||
+                      source.status === "indexing"
+                    }
+                    className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
+                    aria-label={`Re-index ${source.name}`}
+                  >
+                    Re-index
+                  </button>
                   {/* Delete button */}
                   <button
                     onClick={() => handleDeleteSource(source.id)}
@@ -281,6 +433,51 @@ export default function NotebookDetailPage() {
       <ChatSection notebookId={params.id} sources={sources} />
     </div>
   );
+}
+
+// --- Helper functions for file uploads ---
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Strip the data:...;base64, prefix
+      const base64 = result.split(",")[1];
+      resolve(base64);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+
+function isUploadReady(
+  type: string,
+  content: string,
+  url: string,
+  file: File | null,
+): boolean {
+  switch (type) {
+    case "text":
+      return content.trim().length > 0;
+    case "website":
+    case "youtube":
+      return url.trim().length > 0;
+    case "pdf":
+    case "vtt":
+      return file !== null;
+    default:
+      return false;
+  }
 }
 
 function StatusBadge({ status }: { status: Source["status"] }) {

@@ -176,13 +176,15 @@ Build the full ingestion skeleton against the simplest input first.
 
 Ordered easiest → riskiest:
 
-- [ ] Website URL — `jsdom` + `mozilla-readability` on the plain-fetched HTML first; fall back to `puppeteer` only if extracted content is too short/empty (fetch + strip boilerplate/HTML down to article content)
-- [ ] PDF — `pdf-parse` first (fast, simple); fall back to `pdfjs-dist` for complex/multi-column layouts since it returns text with layout/position data, not just plain text; needed for Phase 5's "opens at the relevant section"
-- [ ] VTT/Transcript — `node-webvtt` for `.vtt`, `srt-parser-2` for `.srt`; parse timestamped cues directly
-- [ ] YouTube — `youtube-transcript` to pull captions as timestamped segments (`text` + `offset` + `duration`); build the "no captions available" error path first
-- [ ] Re-index action, wired up for every source type
+- [x] Website URL — `jsdom` + `mozilla-readability` on plain-fetched HTML; `puppeteer` fallback for JS-rendered sites returning < 200 chars
+- [x] PDF — `pdf-parse` v2 (class-based API); per-page extraction with `pageNumber` metadata via `extractPdfPages()`; base64 transfer from UI → worker → Buffer
+- [x] VTT/SRT — `node-webvtt` for `.vtt`, `srt-parser-2` for `.srt`; HTML tag stripping; time-window grouping (45s windows) with `startMs`/`endMs` metadata
+- [x] YouTube — `youtube-transcript`; 3 URL format support; HTML entity decoding; "no captions available" error path; time-window grouping with `startMs`/`endMs` metadata
+- [x] Worker expanded to full `switch` over all 5 types; website/YouTube store extracted content back to `rawContent`
+- [x] Upload UI — type selector buttons, per-type input (textarea / URL field / file picker), `FileReader` for base64 and text file reading
+- [x] Re-index action — `POST /api/sources/[id]/reindex` deletes existing chunks, resets status, re-enqueues; Re-index button on each source row
 
-**Checkpoint:** One notebook holding all five source types, all reaching "ready."
+**Checkpoint:** One notebook holding all five source types, all reaching `ready`. ✓
 
 ---
 
@@ -205,6 +207,7 @@ Treat each row as its own task:
 - [ ] Stream the answer token by token
 - [ ] Tighten the system prompt (grounding instructions + required citation format)
 - [ ] Formatting pass — markdown rendering, clean citation display
+- [ ] Pin citations to each assistant message — move citations out of global state and into each message object so `[1]` in question 1 always shows question 1's chunks, not the latest query's chunks; each answer bubble renders its own citations block directly below it
 
 **Checkpoint:** Ask several varied questions; answers stream and citations are consistently correct.
 
