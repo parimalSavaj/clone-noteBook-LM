@@ -1,27 +1,43 @@
 # docker-compose.yml
 # Phase 0: Local development databases
 # Usage: docker compose up -d
+#
+# Host ports are deliberately non-default (5434 / 6380) because 5432 and 6379
+# are already claimed by other projects on this machine. Container-internal
+# ports stay standard, so only DATABASE_URL / REDIS_URL need to match.
 
 services:
   postgres:
     image: pgvector/pgvector:pg16
+    container_name: notebooklm-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: notebooklm
       POSTGRES_PASSWORD: notebooklm
       POSTGRES_DB: notebooklm
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notebooklm -d notebooklm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine
+    container_name: notebooklm-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   pgdata:

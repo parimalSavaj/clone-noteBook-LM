@@ -5,6 +5,8 @@ export default {
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL || "postgresql://notebooklm:notebooklm@localhost:5432/notebooklm",
+    url:
+      process.env.DATABASE_URL ||
+      "postgresql://notebooklm:notebooklm@localhost:5434/notebooklm",
   },
 } satisfies Config;

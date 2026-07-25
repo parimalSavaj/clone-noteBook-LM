@@ -1,4 +1,3 @@
-import { auth } from "@clerk/nextjs/server";
 import { vectorSearch } from "@/lib/retrieval/search";
 import { generateAnswer } from "@/lib/retrieval/generate";
 
@@ -9,25 +8,20 @@ import { generateAnswer } from "@/lib/retrieval/generate";
  * Returns: streaming text response with inline citations
  */
 export async function POST(request: Request) {
-  const { userId } = await auth();
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const body = await request.json();
   const { notebookId, question } = body;
 
   if (!notebookId || !question) {
     return Response.json(
       { error: "notebookId and question are required" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
-  // 1. Retrieve relevant chunks (scoped by user AND notebook)
-  const chunks = await vectorSearch(question, notebookId, userId, 5);
+  // 1. Retrieve relevant chunks scoped to this notebook
+  const chunks = await vectorSearch(question, notebookId, 5);
 
-  // 2. If no relevant chunks found, return a "not found" message
+  // 2. No relevant chunks — return a clear fallback message
   if (chunks.length === 0) {
     return Response.json({
       answer:
@@ -49,7 +43,7 @@ export async function POST(request: Request) {
           sourceId: c.sourceId,
           chunkIndex: c.chunkIndex,
           metadata: c.metadata,
-        }))
+        })),
       ),
     },
   });

@@ -114,15 +114,15 @@ A phased checklist for building this project. Each phase ends with a checkpoint 
 
 Decide these once, in writing, before writing feature code.
 
-- [ ] Stack: Next.js (App Router), Postgres + pgvector (self-hosted via Docker), LLM + embeddings via **OpenRouter** (single API key, OpenAI-compatible), background jobs via **BullMQ + Redis** (Redis also via Docker)
-- [ ] Auth: **Clerk** — every notebook belongs to a Clerk `user_id`; isolation is now two-layered (user → notebook → knowledge base), not just notebook-level
-- [ ] Docker: `docker-compose.yml` running Postgres+pgvector and Redis locally — no hosted DB/queue accounts
+- [x] Stack: Next.js (App Router), Postgres + pgvector (self-hosted via Docker), LLM + embeddings via **OpenRouter** (single API key, OpenAI-compatible), background jobs via **BullMQ + Redis** (Redis also via Docker)
+- [x] Auth: **none** — local-only app, no login required; all rows use a hardcoded `userId = "local"`
+- [x] Docker: `docker-compose.yml` running Postgres+pgvector and Redis locally — no hosted DB/queue accounts
 - [x] Ingestion layer: Node.js/JavaScript, per-source extraction library decided — see [Data Ingestion Strategy](#data-ingestion-strategy--sources--extraction-tools-nodejs) table above
-- [ ] Repo folder structure (separate ingestion, retrieval, jobs, and API layers early)
-- [ ] Chunking strategy — fixed-size with overlap (e.g. ~500–800 tokens, 10–15% overlap); document the reasoning
-- [ ] `.env.example` scaffold so the env-vars README section isn't an afterthought: `DATABASE_URL`, `OPENROUTER_API_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `REDIS_URL` (plus Google OAuth Client ID/Secret only if/when Google Docs support is added)
+- [x] Repo folder structure (separate ingestion, retrieval, jobs, and API layers early)
+- [x] Chunking strategy — token-aware recursive splitting (400 tokens, 15% overlap, two-stage structure-aware pipeline); documented in `docs/CHUNKING_STRATEGY.md`
+- [x] `.env.example` scaffold: `DATABASE_URL`, `OPENROUTER_API_KEY`, `OPENROUTER_CHAT_MODEL`, `OPENROUTER_EMBEDDING_MODEL`, `REDIS_URL`
 
-Full step-by-step for all of the above: see `PHASE_0_GUIDE.md`.
+Chunking decision documented in `docs/CHUNKING_STRATEGY.md`.
 
 **No live deployment for this project** — runs locally only (Next.js dev server + Docker containers for Postgres/Redis). See note in Phase 9.
 
@@ -130,13 +130,12 @@ Full step-by-step for all of the above: see `PHASE_0_GUIDE.md`.
 
 ## Phase 1 — Notebook/Workspace Foundation
 
-- [ ] Clerk auth wired up: middleware protecting app + API routes, sign-in/sign-up pages working
-- [ ] Schema: `notebooks`, `sources`, `chunks` tables; `notebooks` carries a `user_id` (from Clerk); each chunk carrying `notebook_id`, `source_id`, plus type-specific metadata (page, timestamp, offset)
+- [ ] Schema: `notebooks`, `sources`, `chunks` tables — `userId` column kept with default `"local"` (no migration needed if DB is fresh); each chunk carries `notebook_id`, `source_id`, plus type-specific metadata (page, timestamp, offset)
 - [ ] Create / rename / delete a notebook
-- [ ] Every query and vector search filtered by **both** `user_id` and `notebook_id` — bake isolation in now, at both layers
+- [ ] Vector search scoped to `notebook_id` only — no user isolation needed
 - [ ] Empty state for "no notebooks yet"
 
-**Checkpoint:** Sign in via Clerk, then create, rename, and delete a notebook end-to-end in the UI, scoped to that signed-in user.
+**Checkpoint:** Create, rename, and delete a notebook end-to-end in the UI.
 
 ---
 
@@ -232,8 +231,8 @@ These strengthen "retrieval quality" and "overall engineering thoughtfulness."
 Don't leave this for the last hour — README/demo video work is still real effort even without a live deploy.
 
 - [ ] ~~Deploy the live version~~ — **not doing this.** Scope decision: project runs locally only, via `docker compose up -d` (Postgres+pgvector, Redis) + `npm run dev` (Next.js) + `npm run worker` (BullMQ worker). `PROJECT.md` lists "Live Deployment" as a submission item — if this needs to satisfy that rubric line, confirm a local-only run (repo + demo video) is acceptable before the deadline, or revisit this decision.
-- [ ] README: setup steps (including `docker compose up -d` and running the worker), architecture explanation, retrieval flow, env vars (`DATABASE_URL`, `OPENROUTER_API_KEY`, Clerk keys, `REDIS_URL`)
-- [ ] Demo video: full end-to-end flow run locally, 2–3 technical decisions explained (e.g. why OpenRouter, why Clerk, why BullMQ over a DB job table)
+- [ ] README: setup steps (including `docker compose up -d` and running the worker), architecture explanation, retrieval flow, env vars (`DATABASE_URL`, `OPENROUTER_API_KEY`, `REDIS_URL`)
+- [ ] Demo video: full end-to-end flow run locally, 2–3 technical decisions explained (e.g. why OpenRouter, why BullMQ over a DB job table, why pgvector over a separate vector DB)
 - [ ] Push to a public GitHub repo
 
 ---

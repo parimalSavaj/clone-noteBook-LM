@@ -11,33 +11,29 @@ export interface SearchResult {
 }
 
 /**
- * Perform vector similarity search scoped to a specific notebook and user.
+ * Perform vector similarity search scoped to a specific notebook.
  * Uses cosine similarity via pgvector's <=> operator.
  */
 export async function vectorSearch(
   query: string,
   notebookId: string,
-  userId: string,
   topK: number = 5,
 ): Promise<SearchResult[]> {
   const sql = postgres(process.env.DATABASE_URL!);
 
   try {
-    // 1. Embed the query
     const queryEmbedding = await embedText(query);
 
-    // 2. Search using cosine similarity, scoped by notebook AND user
     const results = await sql`
       SELECT
         id,
-        source_id as "sourceId",
+        source_id    AS "sourceId",
         content,
-        chunk_index as "chunkIndex",
+        chunk_index  AS "chunkIndex",
         metadata,
-        1 - (embedding <=> ${JSON.stringify(queryEmbedding)}::vector) as similarity
+        1 - (embedding <=> ${JSON.stringify(queryEmbedding)}::vector) AS similarity
       FROM chunks
       WHERE notebook_id = ${notebookId}
-        AND user_id = ${userId}
       ORDER BY embedding <=> ${JSON.stringify(queryEmbedding)}::vector
       LIMIT ${topK}
     `;

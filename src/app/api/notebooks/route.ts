@@ -1,21 +1,18 @@
-import { auth } from "@clerk/nextjs/server";
 import { db } from "@/lib/db";
 import { notebooks } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
+// Local-only app — single implicit user, no auth required.
+const LOCAL_USER_ID = "local";
+
 /**
- * GET /api/notebooks — list all notebooks for the authenticated user
+ * GET /api/notebooks — list all notebooks
  */
 export async function GET() {
-  const { userId } = await auth();
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const userNotebooks = await db
     .select()
     .from(notebooks)
-    .where(eq(notebooks.userId, userId))
+    .where(eq(notebooks.userId, LOCAL_USER_ID))
     .orderBy(notebooks.createdAt);
 
   return Response.json(userNotebooks);
@@ -25,11 +22,6 @@ export async function GET() {
  * POST /api/notebooks — create a new notebook
  */
 export async function POST(request: Request) {
-  const { userId } = await auth();
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const body = await request.json();
   const { name, description } = body;
 
@@ -40,7 +32,7 @@ export async function POST(request: Request) {
   const [notebook] = await db
     .insert(notebooks)
     .values({
-      userId,
+      userId: LOCAL_USER_ID,
       name: name.trim(),
       description: description?.trim() || null,
     })

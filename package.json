@@ -13,10 +13,11 @@
     "db:migrate": "tsx --env-file=.env.local src/lib/db/migrate.ts"
   },
   "dependencies": {
-    "@clerk/nextjs": "^7.6.1",
+    "@langchain/textsplitters": "^1.0.1",
     "bullmq": "^5.81.2",
     "drizzle-orm": "^0.45.2",
     "ioredis": "^5.11.1",
+    "js-tiktoken": "^1.0.21",
     "next": "16.2.11",
     "openai": "^6.49.0",
     "pgvector": "^0.3.0",

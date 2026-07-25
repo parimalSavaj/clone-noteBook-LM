@@ -15,7 +15,9 @@ import {
 
 export const notebooks = pgTable("notebooks", {
   id: uuid("id").defaultRandom().primaryKey(),
-  userId: text("user_id").notNull(), // From Clerk auth
+  // userId is kept in the schema for future multi-user support.
+  // For local-only usage, all rows use userId = "local".
+  userId: text("user_id").notNull().default("local"),
   name: text("name").notNull(),
   description: text("description"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -36,7 +38,7 @@ export const sources = pgTable(
     notebookId: uuid("notebook_id")
       .references(() => notebooks.id, { onDelete: "cascade" })
       .notNull(),
-    userId: text("user_id").notNull(),
+    userId: text("user_id").notNull().default("local"),
     type: varchar("type", { length: 20 }).$type<SourceType>().notNull(),
     name: text("name").notNull(),
     status: varchar("status", { length: 20 })
@@ -50,10 +52,7 @@ export const sources = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [
-    index("sources_notebook_idx").on(table.notebookId),
-    index("sources_user_idx").on(table.userId),
-  ]
+  (table) => [index("sources_notebook_idx").on(table.notebookId)],
 );
 
 // ============================================================================
@@ -70,12 +69,10 @@ export const chunks = pgTable(
     notebookId: uuid("notebook_id")
       .references(() => notebooks.id, { onDelete: "cascade" })
       .notNull(),
-    userId: text("user_id").notNull(),
+    userId: text("user_id").notNull().default("local"),
     content: text("content").notNull(),
-    // pgvector embedding — stored as vector(1536) for text-embedding-3-small
-    // Note: the vector column is created via raw SQL migration since drizzle-orm
-    // doesn't have native pgvector support. See migrations.
-    // embedding: vector("embedding", { dimensions: 1536 }),
+    // pgvector embedding — stored as vector(1536) for text-embedding-3-small.
+    // Column is added via raw SQL in migrate.ts (Drizzle has no native pgvector type).
 
     // Chunk ordering within a source
     chunkIndex: integer("chunk_index").notNull(),
@@ -86,6 +83,5 @@ export const chunks = pgTable(
   (table) => [
     index("chunks_source_idx").on(table.sourceId),
     index("chunks_notebook_idx").on(table.notebookId),
-    index("chunks_user_idx").on(table.userId),
-  ]
+  ],
 );

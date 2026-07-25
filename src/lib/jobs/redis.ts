@@ -1,6 +1,7 @@
 import IORedis from "ioredis";
 
-const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+// Host port 6380 matches docker-compose.yml (6379 is taken by another project).
+const redisUrl = process.env.REDIS_URL || "redis://localhost:6380";
 
 /**
  * Shared Redis connection for BullMQ.
