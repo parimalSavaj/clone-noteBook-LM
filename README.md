@@ -1,21 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# NotebookLM Clone
 
-## Getting Started
+A local-first clone of Google's NotebookLM — upload sources and ask questions using RAG-powered chat.
 
-First, run the development server:
+## Setup
 
 ```bash
+# 1. Install dependencies
+npm install
+
+# 2. Create env file and add your OpenRouter API key
+cp .env.example .env.local
+
+# 3. Start Postgres + Redis
+docker compose up -d
+
+# 4. Setup database
+npm run db:push
+npm run db:migrate
+
+# 5. Start the app
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+App runs at [http://localhost:3000](http://localhost:3000)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## View Database
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run db:studio
+```
+
+Opens Drizzle Studio UI to browse tables and rows.
+
+Or via command line:
+
+```bash
+docker exec -it notebooklm-postgres psql -U notebooklm -d notebooklm
+```
+
+## Scripts
+
+- `npm run dev` — Start dev server
+- `npm run db:push` — Push schema to database
+- `npm run db:migrate` — Run pgvector migration
+- `npm run db:studio` — Browse database visually
+- `npm run worker` — Start background job worker
+
+## Tech
+
+Next.js 16, PostgreSQL + pgvector, Drizzle ORM, BullMQ, Redis, OpenRouter, Tailwind CSS

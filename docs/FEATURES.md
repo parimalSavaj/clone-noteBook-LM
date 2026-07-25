@@ -130,12 +130,14 @@ Chunking decision documented in `docs/CHUNKING_STRATEGY.md`.
 
 ## Phase 1 — Notebook/Workspace Foundation
 
-- [ ] Schema: `notebooks`, `sources`, `chunks` tables — `userId` column kept with default `"local"` (no migration needed if DB is fresh); each chunk carries `notebook_id`, `source_id`, plus type-specific metadata (page, timestamp, offset)
-- [ ] Create / rename / delete a notebook
-- [ ] Vector search scoped to `notebook_id` only — no user isolation needed
-- [ ] Empty state for "no notebooks yet"
+- [x] Schema: `notebooks`, `sources`, `chunks` tables — `userId` column kept with default `"local"`; each chunk carries `notebook_id`, `source_id`, plus type-specific metadata (page, timestamp, offset)
+- [x] `GET`, `POST` `/api/notebooks` — list and create
+- [x] `GET`, `PATCH`, `DELETE` `/api/notebooks/[id]` — fetch single, rename, delete (cascades to sources and chunks)
+- [x] Notebooks list page — create form, inline rename, delete with confirmation, empty state, links to detail page
+- [x] Notebook detail page — fetches notebook by id, not-found state, placeholder sections for Sources and Chat
+- [x] Vector search scoped to `notebook_id` only — no user isolation needed
 
-**Checkpoint:** Create, rename, and delete a notebook end-to-end in the UI.
+**Checkpoint:** Create, rename, and delete a notebook end-to-end in the UI. ✓
 
 ---
 
