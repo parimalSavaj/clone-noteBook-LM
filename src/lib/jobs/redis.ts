@@ -18,9 +18,8 @@ export function getRedis(): IORedis {
   return _redis;
 }
 
-// For backward compat — accessed lazily at runtime only
-export const redis = new Proxy({} as IORedis, {
-  get(_target, prop) {
-    return (getRedis() as unknown as Record<string | symbol, unknown>)[prop];
-  },
-});
+/**
+ * Direct IORedis instance for use in worker.ts and other runtime-only code.
+ * NOT a Proxy — BullMQ requires a real IORedis instance.
+ */
+export const redis = getRedis();

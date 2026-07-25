@@ -145,12 +145,15 @@ Chunking decision documented in `docs/CHUNKING_STRATEGY.md`.
 
 Build the full ingestion skeleton against the simplest input first.
 
-- [ ] Upload a plain text source
-- [ ] Background job: chunk → embed → store in vector DB
-- [ ] Status field (`uploading` → `indexing` → `ready`) updates live in the UI
-- [ ] Remove a source (cascades to delete its chunks)
+- [x] Upload a plain text source (paste-as-text form on the notebook detail page)
+- [x] Background job: `indexing` status update → extract → chunk (token-aware recursive) → batch embed → store chunks + vectors in DB → `ready` status update
+- [x] `error` status set on failure so the UI reflects a failed job rather than staying stuck on `indexing`
+- [x] Status field (`uploading` → `indexing` → `ready` / `error`) updates live via polling (2.5 s interval, stops when all sources settle)
+- [x] Status badges with animated pulse for in-progress, green for ready, red for error
+- [x] Remove a source — `DELETE /api/sources/[id]` cascades to chunks, updates parent notebook `updatedAt`
+- [x] Empty state when no sources exist
 
-**Checkpoint:** Upload a text file, watch the status flip to ready, see it listed.
+**Checkpoint:** Upload a text source, watch the status flip to `ready`, confirm chunk rows with embeddings exist in the DB. ✓
 
 ---
 

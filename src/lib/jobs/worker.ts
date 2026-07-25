@@ -13,43 +13,121 @@
 import { Worker, Job } from "bullmq";
 import { redis } from "./redis";
 import type { IndexingJobData } from "./queue";
+import { db } from "@/lib/db";
+import { sources } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { extractText } from "@/lib/ingestion/extractors/text";
+import { chunkText } from "@/lib/ingestion/chunking/chunkText";
+import { embedTexts } from "@/lib/retrieval/embed";
+import postgres from "postgres";
 
 async function processIndexingJob(job: Job<IndexingJobData>) {
   const { sourceId, notebookId, userId, sourceType } = job.data;
 
   console.log(
-    `[Worker] Processing source ${sourceId} (type: ${sourceType}) for notebook ${notebookId}`
+    `[Worker] Processing source ${sourceId} (type: ${sourceType}) for notebook ${notebookId}`,
   );
 
   try {
     // Step 1: Update status to "indexing"
+    await db
+      .update(sources)
+      .set({ status: "indexing", updatedAt: new Date() })
+      .where(eq(sources.id, sourceId));
     await job.updateProgress(10);
-    // TODO: db.update sources set status = 'indexing'
 
-    // Step 2: Extract content based on source type
+    // Step 2: Fetch the source record
+    const [source] = await db
+      .select()
+      .from(sources)
+      .where(eq(sources.id, sourceId));
+
+    if (!source) {
+      throw new Error(`Source ${sourceId} not found in database`);
+    }
     await job.updateProgress(30);
-    // TODO: call appropriate extractor from src/lib/ingestion/extractors/
 
-    // Step 3: Chunk the content
+    // Step 3: Extract content based on source type
+    if (sourceType !== "text") {
+      throw new Error(
+        `Unsupported source type: ${sourceType}. Only "text" is supported in Phase 2.`,
+      );
+    }
+
+    const extractedContent = await extractText(source.rawContent || "");
+
+    if (!extractedContent) {
+      throw new Error(`Source ${sourceId} has no content to process`);
+    }
     await job.updateProgress(50);
-    // TODO: call chunking strategy from src/lib/ingestion/chunking/
 
-    // Step 4: Generate embeddings
+    // Step 4: Chunk the content
+    const chunks = await chunkText(extractedContent);
+
+    if (chunks.length === 0) {
+      throw new Error(`Source ${sourceId} produced no chunks after splitting`);
+    }
+
+    console.log(`[Worker] Source ${sourceId}: ${chunks.length} chunks created`);
     await job.updateProgress(70);
-    // TODO: call OpenRouter embeddings endpoint
 
-    // Step 5: Store chunks + embeddings in vector DB
+    // Step 5: Generate embeddings (batched)
+    const embeddings = await embedTexts(chunks.map((c) => c.content));
+
+    console.log(
+      `[Worker] Source ${sourceId}: ${embeddings.length} embeddings generated`,
+    );
     await job.updateProgress(90);
-    // TODO: insert into chunks table with embedding vectors
 
-    // Step 6: Update status to "ready"
+    // Step 6: Store chunks + embeddings in the vector DB
+    // Use raw postgres client — the embedding column is vector(1536) added via raw SQL
+    // in migrate.ts, so Drizzle doesn't know about it. Insert each row individually
+    // rather than via jsonb_to_recordset, which can't reliably cast jsonb arrays to ::vector.
+    const sql = postgres(process.env.DATABASE_URL!);
+
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const embeddingStr = `[${embeddings[i].join(",")}]`;
+
+        await sql`
+          INSERT INTO chunks (source_id, notebook_id, user_id, content, chunk_index, metadata, embedding)
+          VALUES (
+            ${sourceId}::uuid,
+            ${notebookId}::uuid,
+            ${userId},
+            ${chunk.content},
+            ${chunk.sequenceIndex},
+            ${chunk.metadata ? JSON.stringify(chunk.metadata) : null}::jsonb,
+            ${embeddingStr}::vector
+          )
+        `;
+      }
+    } finally {
+      await sql.end();
+    }
+
+    // Step 7: Update status to "ready"
+    await db
+      .update(sources)
+      .set({ status: "ready", updatedAt: new Date() })
+      .where(eq(sources.id, sourceId));
     await job.updateProgress(100);
-    // TODO: db.update sources set status = 'ready'
 
     console.log(`[Worker] Source ${sourceId} indexed successfully.`);
   } catch (error) {
     console.error(`[Worker] Failed to index source ${sourceId}:`, error);
-    // TODO: db.update sources set status = 'error'
+
+    // Mark source as failed so UI reflects the error
+    try {
+      await db
+        .update(sources)
+        .set({ status: "error", updatedAt: new Date() })
+        .where(eq(sources.id, sourceId));
+    } catch (dbError) {
+      console.error(`[Worker] Failed to set error status:`, dbError);
+    }
+
     throw error; // Let BullMQ handle retries
   }
 }
@@ -60,17 +138,19 @@ const worker = new Worker<IndexingJobData>(
   {
     connection: redis,
     concurrency: 2,
-  }
+  },
 );
 
 worker.on("completed", (job) => {
-  console.log(`[Worker] Job ${job.id} completed for source ${job.data.sourceId}`);
+  console.log(
+    `[Worker] Job ${job.id} completed for source ${job.data.sourceId}`,
+  );
 });
 
 worker.on("failed", (job, err) => {
   console.error(
     `[Worker] Job ${job?.id} failed for source ${job?.data.sourceId}:`,
-    err.message
+    err.message,
   );
 });
 

@@ -18,11 +18,14 @@ docker compose up -d
 npm run db:push
 npm run db:migrate
 
-# 5. Start the app
-npm run dev
+# 5. Start the app (two terminals needed)
+npm run dev        # Terminal 1 — Next.js app
+npm run worker     # Terminal 2 — Background job worker
 ```
 
 App runs at [http://localhost:3000](http://localhost:3000)
+
+The worker processes source uploads (chunking + embedding). Without it, sources stay stuck on "Uploading" status.
 
 ## View Database
 
