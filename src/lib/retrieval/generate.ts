@@ -1,11 +1,65 @@
 import OpenAI from "openai";
 import type { SearchResult } from "./search";
 
+interface HistoryMessage {
+  role: string;
+  content: string;
+}
+
 function getClient() {
   return new OpenAI({
     baseURL: "https://openrouter.ai/api/v1",
     apiKey: process.env.OPENROUTER_API_KEY!,
   });
+}
+
+/**
+ * Rewrite a follow-up question into a standalone search query using conversation history.
+ * This improves retrieval for multi-turn conversations where follow-ups like
+ * "What else did he say?" would otherwise match nothing in vector search.
+ *
+ * Uses a cheap, fast model (gpt-4o-mini) with temperature 0 for deterministic rewrites.
+ */
+export async function rewriteQuery(
+  question: string,
+  history: HistoryMessage[],
+): Promise<string> {
+  // Take the last 4 message pairs (8 messages) for context
+  const recentHistory = history.slice(-8);
+
+  const conversationBlock = recentHistory
+    .map(
+      (msg) => `${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}`,
+    )
+    .join("\n");
+
+  const systemPrompt = `Given this conversation history, rewrite the latest question as a standalone search query that contains all the context needed to retrieve relevant information, even without the conversation history.
+
+Return ONLY the rewritten query — no explanation, no quotes, no prefix.`;
+
+  const userPrompt = `Conversation:
+${conversationBlock}
+
+Latest question: ${question}
+
+Standalone query:`;
+
+  const model = process.env.OPENROUTER_REWRITE_MODEL || "openai/gpt-4o-mini";
+
+  const response = await getClient().chat.completions.create({
+    model,
+    stream: false,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    temperature: 0,
+    max_tokens: 200,
+  });
+
+  const rewritten = response.choices[0]?.message?.content?.trim();
+  // Fallback to original question if rewrite fails
+  return rewritten || question;
 }
 
 /**
@@ -35,8 +89,9 @@ Rules:
 - Never invent information that is not in the sources.
 - Use markdown formatting where appropriate (bold, bullet lists, numbered lists, code blocks).
 - Be concise and direct.
+- Read the entire source content carefully before deciding whether the answer is present.
 
-If the answer is not in the sources, respond with exactly:
+If, after carefully reading all sources, the answer is truly not contained anywhere in them, respond with exactly:
 "I couldn't find information about this in your sources."
 Do not add any other text.
 

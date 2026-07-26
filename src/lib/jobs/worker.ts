@@ -32,6 +32,90 @@ import type { ChunkResult } from "@/lib/ingestion/chunking/chunkText";
 import { embedTexts } from "@/lib/retrieval/embed";
 import postgres from "postgres";
 
+/**
+ * Compute how well a newly indexed source relates to existing sources in the notebook.
+ * Uses cosine similarity between the new source's chunk embeddings and existing ones.
+ * Averages the top-3 similarities per new chunk to produce a 0-1 relevance score.
+ */
+async function computeRelevanceScore(
+  sourceId: string,
+  notebookId: string,
+): Promise<void> {
+  const sql = postgres(process.env.DATABASE_URL!);
+
+  try {
+    // Check if there are existing chunks from other sources in this notebook
+    const existingCount = await sql`
+      SELECT COUNT(*)::int AS count
+      FROM chunks
+      WHERE notebook_id = ${notebookId}
+        AND source_id != ${sourceId}::uuid
+    `;
+
+    if (existingCount[0].count === 0) {
+      // First source in notebook — leave relevanceScore as null
+      console.log(
+        `[Worker] Source ${sourceId}: first source in notebook, skipping relevance scoring.`,
+      );
+      return;
+    }
+
+    // Get the new source's embeddings
+    const newChunkEmbeddings = await sql`
+      SELECT embedding::text AS embedding
+      FROM chunks
+      WHERE source_id = ${sourceId}::uuid
+      LIMIT 20
+    `;
+
+    if (newChunkEmbeddings.length === 0) return;
+
+    // For each new chunk, find its top-3 most similar chunks from other sources
+    let totalSimilarity = 0;
+    let comparisons = 0;
+
+    for (const row of newChunkEmbeddings) {
+      const embedding = row.embedding;
+
+      const topMatches = await sql`
+        SELECT 1 - (embedding <=> ${embedding}::vector) AS similarity
+        FROM chunks
+        WHERE notebook_id = ${notebookId}
+          AND source_id != ${sourceId}::uuid
+        ORDER BY embedding <=> ${embedding}::vector
+        LIMIT 3
+      `;
+
+      for (const match of topMatches) {
+        totalSimilarity += parseFloat(match.similarity);
+        comparisons++;
+      }
+    }
+
+    if (comparisons === 0) return;
+
+    const relevanceScore = totalSimilarity / comparisons;
+
+    // Store on the source row
+    await db
+      .update(sources)
+      .set({ relevanceScore, updatedAt: new Date() })
+      .where(eq(sources.id, sourceId));
+
+    console.log(
+      `[Worker] Source ${sourceId}: relevance score = ${(relevanceScore * 100).toFixed(1)}%`,
+    );
+  } catch (error) {
+    // Non-fatal — don't fail the whole job for relevance scoring
+    console.error(
+      `[Worker] Failed to compute relevance score for source ${sourceId}:`,
+      error,
+    );
+  } finally {
+    await sql.end();
+  }
+}
+
 async function processIndexingJob(job: Job<IndexingJobData>) {
   const { sourceId, notebookId, userId, sourceType } = job.data;
 
@@ -207,6 +291,11 @@ async function processIndexingJob(job: Job<IndexingJobData>) {
       .update(sources)
       .set({ status: "ready", updatedAt: new Date() })
       .where(eq(sources.id, sourceId));
+
+    // Step 7: Compute source relevance score
+    // Measures how well this new source relates to existing sources in the notebook
+    await computeRelevanceScore(sourceId, notebookId);
+
     await job.updateProgress(100);
 
     console.log(`[Worker] Source ${sourceId} indexed successfully.`);

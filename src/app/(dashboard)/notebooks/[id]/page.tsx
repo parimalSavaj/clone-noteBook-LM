@@ -20,6 +20,7 @@ interface Source {
   name: string;
   status: "uploading" | "indexing" | "ready" | "error";
   metadata?: Record<string, unknown>;
+  relevanceScore?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -399,6 +400,10 @@ export default function NotebookDetailPage() {
                   </span>
                   {/* Name */}
                   <span className="font-medium">{source.name}</span>
+                  {/* Relevance score badge */}
+                  {source.relevanceScore != null && (
+                    <RelevanceBadge score={source.relevanceScore} />
+                  )}
                 </div>
                 <div className="flex items-center gap-3">
                   {/* Status badge */}
@@ -507,6 +512,32 @@ function StatusBadge({ status }: { status: Source["status"] }) {
     default:
       return null;
   }
+}
+
+function RelevanceBadge({ score }: { score: number }) {
+  const percentage = Math.round(score * 100);
+
+  // Colour scale: green (>70%), amber (40–70%), red (<40%)
+  let colorClasses: string;
+  if (percentage > 70) {
+    colorClasses =
+      "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400";
+  } else if (percentage >= 40) {
+    colorClasses =
+      "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400";
+  } else {
+    colorClasses =
+      "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400";
+  }
+
+  return (
+    <span
+      className={`text-xs px-2 py-0.5 rounded-full ${colorClasses}`}
+      title={`${percentage}% relevant to other sources in this notebook`}
+    >
+      {percentage}% relevant
+    </span>
+  );
 }
 
 interface Citation {
@@ -650,10 +681,19 @@ function ChatSection({
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     try {
+      // Build history from recent messages (last 6, excluding the empty placeholder)
+      const recentMessages = messages
+        .slice(-6)
+        .map((m) => ({ role: m.role, content: m.content }));
+
       const res = await fetch("/api/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notebookId, question: trimmed }),
+        body: JSON.stringify({
+          notebookId,
+          question: trimmed,
+          history: recentMessages,
+        }),
       });
 
       const contentType = res.headers.get("Content-Type") || "";

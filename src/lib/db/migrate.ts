@@ -38,6 +38,13 @@ async function migrate() {
     ON chunks USING hnsw (embedding vector_cosine_ops)
   `;
 
+  // Create GIN index for full-text keyword search (hybrid search)
+  console.log("Adding GIN index for full-text search...");
+  await sql`
+    CREATE INDEX IF NOT EXISTS chunks_content_fts_idx
+    ON chunks USING gin(to_tsvector('english', content))
+  `;
+
   console.log("Migration complete.");
   await sql.end();
 }

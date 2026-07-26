@@ -6,6 +6,7 @@ import {
   integer,
   varchar,
   jsonb,
+  real,
   index,
 } from "drizzle-orm/pg-core";
 
@@ -49,6 +50,8 @@ export const sources = pgTable(
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     // Raw content stored after extraction (before chunking)
     rawContent: text("raw_content"),
+    // Relevance score: how well this source relates to other sources in the notebook (0-1, null = not computed)
+    relevanceScore: real("relevance_score"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

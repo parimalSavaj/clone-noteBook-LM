@@ -221,15 +221,10 @@ Ordered easiest → riskiest:
 
 ## Phase 7 — Advanced Features (Once Phases 1–6 Are Solid)
 
-These strengthen "retrieval quality" and "overall engineering thoughtfulness."
-
-- [ ] Hybrid search — vector + keyword/BM25 alongside pure vector search
-- [ ] Small eval set (10–20 question/expected-chunk pairs); rerun after any retrieval change
-- [ ] Multi-turn query rewriting so follow-up questions retrieve correctly
-- [ ] Source relevance scoring on new uploads
-- [ ] Chunk visualization for all source types
-- [ ] Smart source organization suggestions
-- [ ] Background re-chunking/re-embedding pipeline
+- [x] **Hybrid search** — `keywordSearch()` via Postgres `tsvector`/`tsquery` + `vectorSearch()` merged with RRF (`k=60`); GIN index `chunks_content_fts_idx` added in `migrate.ts` and confirmed in DB; `hybridSearch()` runs both in parallel via `Promise.all`
+- [x] **Multi-turn query rewriting** — `rewriteQuery()` in `generate.ts`; `route.ts` accepts `history[]`, rewrites when `history.length > 2` using gpt-4o-mini at `temperature: 0`; frontend passes last 6 messages as history
+- [x] **Neighbour expansion** — `expandWithNeighbours()` fetches `chunk_index ± 1` for top-3 results, deduplicates against existing result set, merges content seamlessly; `X-Citations` still sends original chunks (not expanded) so citation metadata stays precise
+- [x] **Source relevance scoring** — `computeRelevanceScore()` in worker runs after status → `ready`; averages top-3 cosine similarities per new chunk against all existing notebook chunks; non-fatal catch; skips for first source in notebook; stored as `real` column on sources; `RelevanceBadge` component with green (>70%) / amber (40–70%) / red (<40%) colour scale
 
 ---
 
