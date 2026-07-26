@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
 
 interface Notebook {
   id: string;
@@ -513,6 +514,7 @@ interface Citation {
   sourceId: string;
   chunkIndex: number;
   metadata: Record<string, unknown>;
+  similarity?: number;
 }
 
 interface Message {
@@ -578,35 +580,39 @@ function buildCitationLabel(
 ): string {
   const source = sources.find((s) => s.id === citation.sourceId);
   const name = source?.name || "Unknown source";
+  const similarityStr =
+    citation.similarity != null
+      ? ` (${Math.round(citation.similarity * 100)}% match)`
+      : "";
 
-  if (!source) return `[${index}] ${name}`;
+  if (!source) return `[${index}] ${name}${similarityStr}`;
 
   switch (source.type) {
     case "pdf": {
       const page = citation.metadata?.pageNumber as number | undefined;
       return page != null
-        ? `[${index}] ${name} — page ${page}`
-        : `[${index}] ${name} — chunk ${citation.chunkIndex}`;
+        ? `[${index}] ${name} — page ${page}${similarityStr}`
+        : `[${index}] ${name} — chunk ${citation.chunkIndex}${similarityStr}`;
     }
     case "youtube": {
       const startMs = citation.metadata?.startMs as number | undefined;
       return startMs != null
-        ? `[${index}] ${name} — ${formatTimestamp(startMs)}`
-        : `[${index}] ${name}`;
+        ? `[${index}] ${name} — ${formatTimestamp(startMs)}${similarityStr}`
+        : `[${index}] ${name}${similarityStr}`;
     }
     case "vtt": {
       const startMs = citation.metadata?.startMs as number | undefined;
       const endMs = citation.metadata?.endMs as number | undefined;
       if (startMs != null && endMs != null) {
-        return `[${index}] ${name} — ${formatTimestamp(startMs)} – ${formatTimestamp(endMs)}`;
+        return `[${index}] ${name} — ${formatTimestamp(startMs)} – ${formatTimestamp(endMs)}${similarityStr}`;
       }
-      return `[${index}] ${name} — chunk ${citation.chunkIndex}`;
+      return `[${index}] ${name} — chunk ${citation.chunkIndex}${similarityStr}`;
     }
     case "website":
-      return `[${index}] ${name}`;
+      return `[${index}] ${name}${similarityStr}`;
     case "text":
     default:
-      return `[${index}] ${name} — chunk ${citation.chunkIndex}`;
+      return `[${index}] ${name} — chunk ${citation.chunkIndex}${similarityStr}`;
   }
 }
 
@@ -771,11 +777,24 @@ function ChatSection({
                     : "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100"
                 }`}
               >
-                {msg.content || (
-                  <span className="inline-flex items-center gap-1 text-zinc-400">
-                    <span className="inline-block w-2 h-2 rounded-full bg-zinc-400 animate-pulse" />
-                    Thinking…
-                  </span>
+                {msg.role === "assistant" ? (
+                  msg.content ? (
+                    <div className="prose prose-sm dark:prose-invert max-w-none">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-zinc-400">
+                      <span className="inline-block w-2 h-2 rounded-full bg-zinc-400 animate-pulse" />
+                      Thinking…
+                    </span>
+                  )
+                ) : (
+                  msg.content || (
+                    <span className="inline-flex items-center gap-1 text-zinc-400">
+                      <span className="inline-block w-2 h-2 rounded-full bg-zinc-400 animate-pulse" />
+                      Thinking…
+                    </span>
+                  )
                 )}
               </div>
 

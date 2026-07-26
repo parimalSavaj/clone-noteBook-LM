@@ -205,10 +205,15 @@ Ordered easiest → riskiest:
 
 ## Phase 6 — Response Quality
 
-- [ ] Stream the answer token by token
-- [ ] Tighten the system prompt (grounding instructions + required citation format)
-- [ ] Formatting pass — markdown rendering, clean citation display
-- [ ] Pin citations to each assistant message — move citations out of global state and into each message object so `[1]` in question 1 always shows question 1's chunks, not the latest query's chunks; each answer bubble renders its own citations block directly below it
+- [x] Stream the answer token by token (already working; verified clean)
+- [x] Tighter system prompt — strict inline citation rules (citation before the period, `[1][2]` for multi-source sentences, no references section, no uncited claims), exact "not found" phrase enforced
+- [x] Source names shown in context block instead of raw UUIDs — `route.ts` builds a `sourceNames` map via a DB lookup and passes it to `generateAnswer()`
+- [x] Similarity threshold — `vectorSearch()` accepts `minSimilarity: 0.3`; SQL WHERE clause filters below threshold; "not found" fallback fires naturally for off-topic questions
+- [x] `similarity` score added to `X-Citations` header and shown as `(N% match)` in citation labels
+- [x] Markdown rendering — `react-markdown` with `prose prose-sm dark:prose-invert max-w-none` wrapper; `@tailwindcss/typography` wired via `@plugin` in `globals.css` (Tailwind v4 CSS-first config)
+- [x] Citations pinned per-message already from Phase 5 — confirmed correct
+
+**Checkpoint:** Answers stream, markdown renders, citations are consistently inline with the specific claim, similarity scores visible, "not found" fallback fires cleanly. ✓
 
 **Checkpoint:** Ask several varied questions; answers stream and citations are consistently correct.
 
