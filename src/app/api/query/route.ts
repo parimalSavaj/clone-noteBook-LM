@@ -37,6 +37,7 @@ export async function POST(request: Request) {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Transfer-Encoding": "chunked",
+      "Access-Control-Expose-Headers": "X-Citations",
       "X-Citations": JSON.stringify(
         chunks.map((c) => ({
           id: c.id,

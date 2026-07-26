@@ -18,6 +18,7 @@ interface Source {
   type: string;
   name: string;
   status: "uploading" | "indexing" | "ready" | "error";
+  metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -114,7 +115,7 @@ export default function NotebookDetailPage() {
     setUploading(true);
 
     try {
-      let body: Record<string, unknown> = {
+      const body: Record<string, unknown> = {
         notebookId: params.id,
         type: uploadType,
       };
@@ -507,16 +508,106 @@ function StatusBadge({ status }: { status: Source["status"] }) {
   }
 }
 
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
-
 interface Citation {
   id: string;
   sourceId: string;
   chunkIndex: number;
   metadata: Record<string, unknown>;
+}
+
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+  citations?: Citation[];
+}
+
+// --- Citation helpers ---
+
+function formatTimestamp(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function buildCitationHref(
+  citation: Citation,
+  sources: Source[],
+): string | null {
+  const source = sources.find((s) => s.id === citation.sourceId);
+  if (!source) return null;
+
+  switch (source.type) {
+    case "youtube": {
+      const meta = source.metadata as
+        | { videoUrl?: string; videoId?: string }
+        | undefined;
+      const videoId =
+        meta?.videoId ||
+        (meta?.videoUrl ? extractYouTubeId(meta.videoUrl) : null);
+      const startMs = citation.metadata?.startMs as number | undefined;
+      if (videoId) {
+        const seconds = startMs ? Math.floor(startMs / 1000) : 0;
+        return `https://youtube.com/watch?v=${videoId}&t=${seconds}`;
+      }
+      return null;
+    }
+    case "website": {
+      const meta = source.metadata as { url?: string } | undefined;
+      return meta?.url || null;
+    }
+    case "pdf":
+    case "vtt":
+    case "text":
+    default:
+      return null;
+  }
+}
+
+function extractYouTubeId(url: string): string | null {
+  const match = url.match(
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+  );
+  return match ? match[1] : null;
+}
+
+function buildCitationLabel(
+  citation: Citation,
+  index: number,
+  sources: Source[],
+): string {
+  const source = sources.find((s) => s.id === citation.sourceId);
+  const name = source?.name || "Unknown source";
+
+  if (!source) return `[${index}] ${name}`;
+
+  switch (source.type) {
+    case "pdf": {
+      const page = citation.metadata?.pageNumber as number | undefined;
+      return page != null
+        ? `[${index}] ${name} — page ${page}`
+        : `[${index}] ${name} — chunk ${citation.chunkIndex}`;
+    }
+    case "youtube": {
+      const startMs = citation.metadata?.startMs as number | undefined;
+      return startMs != null
+        ? `[${index}] ${name} — ${formatTimestamp(startMs)}`
+        : `[${index}] ${name}`;
+    }
+    case "vtt": {
+      const startMs = citation.metadata?.startMs as number | undefined;
+      const endMs = citation.metadata?.endMs as number | undefined;
+      if (startMs != null && endMs != null) {
+        return `[${index}] ${name} — ${formatTimestamp(startMs)} – ${formatTimestamp(endMs)}`;
+      }
+      return `[${index}] ${name} — chunk ${citation.chunkIndex}`;
+    }
+    case "website":
+      return `[${index}] ${name}`;
+    case "text":
+    default:
+      return `[${index}] ${name} — chunk ${citation.chunkIndex}`;
+  }
 }
 
 function ChatSection({
@@ -527,7 +618,6 @@ function ChatSection({
   sources: Source[];
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [citations, setCitations] = useState<Citation[]>([]);
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -549,7 +639,6 @@ function ChatSection({
     setMessages((prev) => [...prev, userMessage]);
     setQuestion("");
     setAsking(true);
-    setCitations([]);
 
     // 2. Append empty assistant placeholder
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
@@ -566,24 +655,46 @@ function ChatSection({
       // Non-streaming JSON fallback (no results found)
       if (contentType.includes("application/json")) {
         const data = await res.json();
+        const fallbackCitations: Citation[] = (data.citations || []).map(
+          (c: Record<string, unknown>) => ({
+            ...c,
+            metadata:
+              typeof c.metadata === "string"
+                ? JSON.parse(c.metadata as string)
+                : c.metadata || {},
+          }),
+        );
         setMessages((prev) => {
           const updated = [...prev];
           updated[updated.length - 1] = {
             role: "assistant",
             content: data.answer,
+            citations: fallbackCitations,
           };
           return updated;
         });
-        setCitations(data.citations || []);
         setAsking(false);
         return;
       }
 
       // Read X-Citations header before consuming the stream
       const citationsHeader = res.headers.get("X-Citations");
-      const parsedCitations: Citation[] = citationsHeader
-        ? JSON.parse(citationsHeader)
-        : [];
+      let parsedCitations: Citation[] = [];
+      if (citationsHeader) {
+        try {
+          parsedCitations = JSON.parse(citationsHeader).map(
+            (c: Record<string, unknown>) => ({
+              ...c,
+              metadata:
+                typeof c.metadata === "string"
+                  ? JSON.parse(c.metadata)
+                  : c.metadata || {},
+            }),
+          );
+        } catch {
+          parsedCitations = [];
+        }
+      }
 
       // Stream the response body
       const reader = res.body?.getReader();
@@ -611,7 +722,15 @@ function ChatSection({
         });
       }
 
-      setCitations(parsedCitations);
+      // Pin citations to the assistant message
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          ...updated[updated.length - 1],
+          citations: parsedCitations,
+        };
+        return updated;
+      });
     } catch (err) {
       console.error("Query failed:", err);
       setMessages((prev) => {
@@ -625,12 +744,6 @@ function ChatSection({
     } finally {
       setAsking(false);
     }
-  }
-
-  // Look up source name by ID
-  function getSourceName(sourceId: string): string {
-    const source = sources.find((s) => s.id === sourceId);
-    return source?.name || "Unknown source";
   }
 
   return (
@@ -649,7 +762,7 @@ function ChatSection({
           {messages.map((msg, idx) => (
             <div
               key={idx}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
             >
               <div
                 className={`max-w-[80%] rounded-lg px-4 py-2 ${
@@ -665,26 +778,46 @@ function ChatSection({
                   </span>
                 )}
               </div>
+
+              {/* Per-message citations */}
+              {msg.role === "assistant" &&
+                msg.citations &&
+                msg.citations.length > 0 && (
+                  <div className="max-w-[80%] mt-2 p-3 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg">
+                    <p className="text-xs font-semibold text-zinc-500 uppercase mb-2">
+                      Citations
+                    </p>
+                    <ol className="list-none space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
+                      {msg.citations.map((citation, citIdx) => {
+                        const href = buildCitationHref(citation, sources);
+                        const label = buildCitationLabel(
+                          citation,
+                          citIdx + 1,
+                          sources,
+                        );
+
+                        return (
+                          <li key={citation.id}>
+                            {href ? (
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 dark:text-blue-400 hover:underline"
+                              >
+                                {label}
+                              </a>
+                            ) : (
+                              <span>{label}</span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </div>
+                )}
             </div>
           ))}
-
-          {/* Citations panel — shown after the latest assistant message */}
-          {citations.length > 0 && !asking && (
-            <div className="ml-0 mt-2 p-3 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg">
-              <p className="text-xs font-semibold text-zinc-500 uppercase mb-2">
-                Citations
-              </p>
-              <ol className="list-decimal list-inside space-y-1 text-sm text-zinc-600 dark:text-zinc-400">
-                {citations.map((citation, idx) => (
-                  <li key={citation.id}>
-                    <span className="font-medium">[{idx + 1}]</span>{" "}
-                    {getSourceName(citation.sourceId)} — chunk{" "}
-                    {citation.chunkIndex}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
 
           <div ref={messagesEndRef} />
         </div>

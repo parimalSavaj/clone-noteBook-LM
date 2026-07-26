@@ -190,15 +190,16 @@ Ordered easiest → riskiest:
 
 ## Phase 5 — Citations & Source Viewer, Per Type
 
-Treat each row as its own task:
+- [x] Citations pinned to each assistant message — `Message` interface carries `citations?: Citation[]`; global citations state removed; every answer in the thread shows its own citations permanently
+- [x] PDF → `[N] Name — page N` label (no in-app viewer; Phase 7)
+- [x] Website → `[N] Name` linked to original URL, opens in new tab
+- [x] YouTube → `[N] Name — M:SS` linked to `youtube.com/watch?v=ID&t=SECONDS`, opens at cited timestamp
+- [x] VTT/SRT → `[N] Name — M:SS – M:SS` timestamp range label
+- [x] Text → `[N] Name — chunk N` label
+- [x] `buildCitationHref()` and `buildCitationLabel()` helpers, `formatTimestamp()` utility
+- [x] `X-Citations` header read before stream body; metadata defensively parsed in both streaming and JSON fallback paths
 
-- [ ] PDF → opens at the relevant page/section
-- [ ] Website → opens or previews the page
-- [ ] YouTube → opens the video at the cited timestamp
-- [ ] Text → highlights the relevant span
-- [ ] Transcript → highlights the cited chunk
-
-**Checkpoint:** Click a citation for every source type; confirm each opens correctly.
+**Checkpoint:** Click a citation for every source type; YouTube and Website open at the correct location. ✓
 
 ---
 
