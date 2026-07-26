@@ -246,12 +246,10 @@ Ordered easiest → riskiest:
 
 ## Phase 9 — Deployment & Docs
 
-Don't leave this for the last hour — README/demo video work is still real effort even without a live deploy.
-
-- [ ] ~~Deploy the live version~~ — **not doing this.** Scope decision: project runs locally only, via `docker compose up -d` (Postgres+pgvector, Redis) + `npm run dev` (Next.js) + `npm run worker` (BullMQ worker). `PROJECT.md` lists "Live Deployment" as a submission item — if this needs to satisfy that rubric line, confirm a local-only run (repo + demo video) is acceptable before the deadline, or revisit this decision.
-- [ ] README: setup steps (including `docker compose up -d` and running the worker), architecture explanation, retrieval flow, env vars (`DATABASE_URL`, `OPENROUTER_API_KEY`, `REDIS_URL`)
-- [ ] Demo video: full end-to-end flow run locally, 2–3 technical decisions explained (e.g. why OpenRouter, why BullMQ over a DB job table, why pgvector over a separate vector DB)
-- [ ] Push to a public GitHub repo
+- [x] ~~Deploy the live version~~ — **not doing this.** Runs locally only via `docker compose up -d` + `npm run dev` + `npm run worker`
+- [x] README — prerequisites, quick start with verification checklist, env vars table, architecture + query/ingestion flow diagrams, 4 key technical decisions, scripts reference, stopping/resetting
+- [x] Demo video — recorded and linked in README (Google Drive)
+- [x] Pushed to public GitHub repo — [parimalSavaj/clone-noteBook-LM](https://github.com/parimalSavaj/clone-noteBook-LM)
 
 ---
 
