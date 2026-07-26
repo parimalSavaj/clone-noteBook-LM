@@ -44,6 +44,11 @@ export default function NotebookDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [reindexingId, setReindexingId] = useState<string | null>(null);
 
+  // Error states
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+
   // Polling ref
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -54,8 +59,8 @@ export default function NotebookDetailPage() {
         const data = await res.json();
         setSources(data);
       }
-    } catch (err) {
-      console.error("Failed to fetch sources:", err);
+    } catch {
+      // silent for background polling
     }
   }, [params.id]);
 
@@ -71,10 +76,12 @@ export default function NotebookDetailPage() {
         if (res.ok) {
           const data = await res.json();
           setNotebook(data);
+        } else {
+          setFetchError("Couldn't load notebook.");
         }
         await fetchSources();
-      } catch (err) {
-        console.error("Failed to fetch notebook:", err);
+      } catch {
+        setFetchError("Couldn't load notebook.");
       } finally {
         setLoading(false);
       }
@@ -114,7 +121,18 @@ export default function NotebookDetailPage() {
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
+
+    // Validate before touching loading state
+    if (uploadType === "text" && !uploadContent.trim()) return;
+    if (
+      (uploadType === "website" || uploadType === "youtube") &&
+      !uploadUrl.trim()
+    )
+      return;
+    if ((uploadType === "pdf" || uploadType === "vtt") && !uploadFile) return;
+
     setUploading(true);
+    setUploadError(null);
 
     try {
       const body: Record<string, unknown> = {
@@ -124,36 +142,31 @@ export default function NotebookDetailPage() {
 
       switch (uploadType) {
         case "text": {
-          if (!uploadContent.trim()) return;
           body.name = uploadName.trim() || `Text source ${sources.length + 1}`;
           body.content = uploadContent;
           break;
         }
         case "website": {
-          if (!uploadUrl.trim()) return;
           body.name = uploadName.trim() || uploadUrl.trim();
           body.metadata = { url: uploadUrl.trim() };
           break;
         }
         case "pdf": {
-          if (!uploadFile) return;
-          const base64 = await readFileAsBase64(uploadFile);
-          body.name = uploadName.trim() || uploadFile.name;
+          const base64 = await readFileAsBase64(uploadFile!);
+          body.name = uploadName.trim() || uploadFile!.name;
           body.content = base64;
-          body.metadata = { filename: uploadFile.name };
+          body.metadata = { filename: uploadFile!.name };
           break;
         }
         case "vtt": {
-          if (!uploadFile) return;
-          const text = await readFileAsText(uploadFile);
-          const format = uploadFile.name.endsWith(".srt") ? "srt" : "vtt";
-          body.name = uploadName.trim() || uploadFile.name;
+          const text = await readFileAsText(uploadFile!);
+          const format = uploadFile!.name.endsWith(".srt") ? "srt" : "vtt";
+          body.name = uploadName.trim() || uploadFile!.name;
           body.content = text;
-          body.metadata = { filename: uploadFile.name, format };
+          body.metadata = { filename: uploadFile!.name, format };
           break;
         }
         case "youtube": {
-          if (!uploadUrl.trim()) return;
           body.name = uploadName.trim() || `YouTube: ${uploadUrl.trim()}`;
           body.metadata = { videoUrl: uploadUrl.trim() };
           break;
@@ -169,9 +182,11 @@ export default function NotebookDetailPage() {
         const newSource = await res.json();
         setSources((prev) => [...prev, newSource]);
         resetUploadForm();
+      } else {
+        setUploadError("Upload failed. Check the source and try again.");
       }
-    } catch (err) {
-      console.error("Failed to upload source:", err);
+    } catch {
+      setUploadError("Upload failed. Check the source and try again.");
     } finally {
       setUploading(false);
     }
@@ -179,15 +194,18 @@ export default function NotebookDetailPage() {
 
   async function handleReindex(sourceId: string) {
     setReindexingId(sourceId);
+    setSourceError(null);
     try {
       const res = await fetch(`/api/sources/${sourceId}/reindex`, {
         method: "POST",
       });
       if (res.ok) {
         await fetchSources();
+      } else {
+        setSourceError("Re-index failed.");
       }
-    } catch (err) {
-      console.error("Failed to reindex source:", err);
+    } catch {
+      setSourceError("Re-index failed.");
     } finally {
       setReindexingId(null);
     }
@@ -199,13 +217,16 @@ export default function NotebookDetailPage() {
     );
     if (!confirmed) return;
 
+    setSourceError(null);
     try {
       const res = await fetch(`/api/sources/${id}`, { method: "DELETE" });
       if (res.ok) {
         setSources((prev) => prev.filter((s) => s.id !== id));
+      } else {
+        setSourceError("Couldn't delete source.");
       }
-    } catch (err) {
-      console.error("Failed to delete source:", err);
+    } catch {
+      setSourceError("Couldn't delete source.");
     }
   }
 
@@ -219,10 +240,12 @@ export default function NotebookDetailPage() {
 
   if (notFound || !notebook) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8">
-        <h2 className="text-2xl font-bold mb-2">Notebook not found</h2>
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-4 sm:p-8">
+        <h2 className="text-2xl font-bold mb-2">
+          {fetchError ? "Error" : "Notebook not found"}
+        </h2>
         <p className="text-zinc-500 mb-6">
-          This notebook may have been deleted.
+          {fetchError || "This notebook may have been deleted."}
         </p>
         <Link
           href="/notebooks"
@@ -235,7 +258,7 @@ export default function NotebookDetailPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-8">
+    <div className="max-w-4xl mx-auto p-4 sm:p-8">
       {/* Header */}
       <div className="mb-8">
         <Link
@@ -261,6 +284,13 @@ export default function NotebookDetailPage() {
             + Add Source
           </button>
         </div>
+
+        {/* Source error message */}
+        {sourceError && (
+          <p className="text-sm text-red-600 dark:text-red-400 mb-3">
+            {sourceError}
+          </p>
+        )}
 
         {/* Upload form */}
         {showUploadForm && (
@@ -376,6 +406,12 @@ export default function NotebookDetailPage() {
                 Cancel
               </button>
             </div>
+
+            {uploadError && (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                {uploadError}
+              </p>
+            )}
           </form>
         )}
 
@@ -393,13 +429,15 @@ export default function NotebookDetailPage() {
                 key={source.id}
                 className="group flex items-center justify-between p-3 border border-zinc-200 dark:border-zinc-700 rounded-lg"
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   {/* Type badge */}
-                  <span className="text-xs px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 uppercase font-medium">
+                  <span className="flex-shrink-0 text-xs px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 uppercase font-medium">
                     {source.type}
                   </span>
                   {/* Name */}
-                  <span className="font-medium">{source.name}</span>
+                  <span className="font-medium truncate min-w-0 max-w-[200px] sm:max-w-xs">
+                    {source.name}
+                  </span>
                   {/* Relevance score badge */}
                   {source.relevanceScore != null && (
                     <RelevanceBadge score={source.relevanceScore} />
@@ -768,17 +806,28 @@ function ChatSection({
         });
       }
 
-      // Pin citations to the assistant message
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          ...updated[updated.length - 1],
-          citations: parsedCitations,
-        };
-        return updated;
-      });
-    } catch (err) {
-      console.error("Query failed:", err);
+      // If the stream ended with no content, show error fallback
+      if (!accumulated.trim()) {
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: "Something went wrong. Please try again.",
+          };
+          return updated;
+        });
+      } else {
+        // Pin citations to the assistant message
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            ...updated[updated.length - 1],
+            citations: parsedCitations,
+          };
+          return updated;
+        });
+      }
+    } catch {
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = {
@@ -796,7 +845,7 @@ function ChatSection({
     <section>
       <h2 className="text-xl font-semibold mb-4">Chat</h2>
 
-      <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg flex flex-col h-[500px]">
+      <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg flex flex-col min-h-[300px] max-h-[500px]">
         {/* Message history */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 && (

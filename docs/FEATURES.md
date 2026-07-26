@@ -230,11 +230,17 @@ Ordered easiest → riskiest:
 
 ## Phase 8 — Polish (Explicit Rubric Line Items)
 
-- [ ] Loading state for every async action
-- [ ] Empty states (no notebooks / no sources / no messages yet)
-- [ ] Visible error handling — failed upload, failed indexing, LLM timeout
-- [ ] Responsive layout pass
-- [ ] Folder structure and code cleanup pass
+- [x] Upload early-return bug fixed — validation before `setUploading(true)`, non-null assertions safe after guard
+- [x] Loading states — `renamingId` / `deletingId` on notebooks page; re-index already had `reindexingId`; all buttons disabled during in-flight requests
+- [x] Empty states — all existing empty states confirmed; description shown on notebook detail when present
+- [x] Visible error handling — `fetchError` (with retry) on both pages; `actionError` dismissable banner on notebooks list; `uploadError` / `sourceError` inline on detail page; empty stream fallback in chat
+- [x] Background poll `catch` intentionally silent — transient poll failures don't surface as errors
+- [x] Responsive layout — `p-4 sm:p-8` on both pages; chat panel `min-h-[300px] max-h-[500px]`; source names `truncate min-w-0`; type badge `flex-shrink-0`
+- [x] Body font fixed — `var(--font-sans), Arial, Helvetica, sans-serif` uses Geist Sans via CSS variable
+- [x] Description field added to notebook create form; `formatRelativeTime()` shows `updatedAt` on notebook list rows
+- [x] Dead `console.error` calls removed from all user-facing catch blocks
+
+**Checkpoint:** Every async action shows feedback; layout holds at 375px; Geist font renders correctly. ✓
 
 ---
 
